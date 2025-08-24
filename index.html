@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1"/>
+  <title>Workout Timer – Single File</title>
+  <meta name="theme-color" content="#2563eb"/>
+  <style>
+    :root{--fg:#111;--bg:#fafafa;--muted:#6b7280;--accent:#2563eb}
+    *{box-sizing:border-box}
+    html,body{margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,-apple-system,Segoe UI,Roboto,Ubuntu,Arial,sans-serif}
+    header{padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center;background:#fff;position:sticky;top:0;z-index:10}
+    h1{font-size:18px;margin:0}
+    .wrap{max-width:840px;margin:0 auto;padding:16px}
+    .panel{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;margin-bottom:12px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .grow{flex:1}
+    label{font-size:12px;color:var(--muted);display:block;margin-bottom:6px}
+    input,select,textarea{width:100%;padding:10px 12px;border:1px solid #d1d5db;border-radius:10px;font-size:16px;background:white;color:var(--fg)}
+    textarea{min-height:110px;resize:vertical}
+    .btn{appearance:none;border:none;border-radius:12px;padding:12px 16px;font-weight:700;font-size:16px;cursor:pointer;transition:.15s;display:inline-flex;align-items:center;gap:8px}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-primary{background:var(--accent);color:#fff}
+    .btn-ghost{background:#eef2ff;color:#1e3a8a}
+    .btn-warn{background:#ef4444;color:#fff}
+    .timer-card{display:grid;gap:10px;justify-items:center;text-align:center}
+    .phase{font-size:14px;color:var(--muted);text-transform:uppercase;letter-spacing:.2px}
+    .exercise{font-size:26px;font-weight:800}
+    .clock{font-variant-numeric:tabular-nums;font-size:48px;font-weight:900}
+    .progress{width:100%;height:14px;background:#f1f5f9;border-radius:999px;overflow:hidden;border:1px solid #e2e8f0}
+    .bar{height:100%;width:0;background:linear-gradient(90deg,var(--accent),#22c55e)}
+    .pill{display:inline-flex;align-items:center;gap:6px;padding:6px 10px;border:1px solid #e5e7eb;border-radius:999px;background:#fff}
+    .list{list-style:none;margin:0;padding:0}
+    .list li{padding:8px 10px;border:1px dashed #e5e7eb;border-radius:10px;margin-bottom:8px;background:#fff;display:flex;justify-content:space-between;align-items:center}
+    footer.small{font-size:12px;color:var(--muted);text-align:center;margin-top:10px}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Workout Timer</h1>
+    <div class="row">
+      <label class="pill"><input id="voiceToggle" type="checkbox" checked> Stimme</label>
+      <label class="pill"><input id="vibrateToggle" type="checkbox" checked> Vibration</label>
+      <label class="pill">Stimme: <select id="voiceSelect"></select></label>
+    </div>
+  </header>
+  <main class="wrap">
+    <section class="panel timer-card" aria-live="polite">
+      <div class="phase" id="phase">Bereit</div>
+      <div class="exercise" id="exercise">Drücke Start</div>
+      <div class="clock" id="clock">00:40</div>
+      <div class="progress"><div class="bar" id="bar"></div></div>
+      <div class="row">
+        <button id="startBtn" class="btn btn-primary">Start</button>
+        <button id="pauseBtn" class="btn btn-ghost" disabled>Pausieren</button>
+        <button id="resetBtn" class="btn btn-warn" disabled>Reset</button>
+        <span class="pill">Runde: <b id="round">1</b></span>
+        <span class="pill">Gesamt: <b id="totalTime">00:00</b></span>
+      </div>
+    </section>
+    <section class="panel">
+      <div class="row">
+        <div class="grow">
+          <label>Routine (eine Zeile je Übung)</label>
+          <textarea id="routineInput">Liegestütze
+Kniebeugen
+Plank
+Dips
+Bauch-Crunches</textarea>
+        </div>
+        <div>
+          <label>Arbeitszeit (Sek.)</label>
+          <input id="workSec" type="number" min="10" max="180" step="5" value="40"/>
+        </div>
+        <div>
+          <label>Pause (Sek.)</label>
+          <input id="restSec" type="number" min="0" max="180" step="5" value="20"/>
+        </div>
+        <div>
+          <label>Runden</label>
+          <input id="rounds" type="number" min="1" max="10" step="1" value="1"/>
+        </div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button id="applyBtn" class="btn btn-ghost">Änderungen übernehmen</button>
+        <span class="pill">Tipp: In Safari öffnen (nicht nur Vorschau), damit Stimme/Vibration laufen.</span>
+      </div>
+    </section>
+    <section class="panel">
+      <h3 style="margin:0 0 6px 0">Nächste Schritte</h3>
+      <ul class="list" id="previewList"></ul>
+      <footer class="small">Ein-Datei-Version. Für Homescreen: in Safari öffnen → Teilen → „Zum Home-Bildschirm“.</footer>
+    </section>
+    <footer class="small">Made for Denis</footer>
+  </main>
+  <script>
+    const $ = id => document.getElementById(id);
+    const clockEl = $("clock"), exerciseEl = $("exercise"), phaseEl = $("phase"), barEl = $("bar");
+    const startBtn = $("startBtn"), pauseBtn = $("pauseBtn"), resetBtn = $("resetBtn");
+    const workSecEl = $("workSec"), restSecEl = $("restSec"), roundsEl = $("rounds"), routineInput = $("routineInput");
+    const applyBtn = $("applyBtn"), previewList = $("previewList");
+    const voiceToggle = $("voiceToggle"), vibrateToggle = $("vibrateToggle"), voiceSelect = $("voiceSelect");
+    const roundBadge = $("round"), totalTimeEl = $("totalTime");
+    let voices = [];
+    function loadVoices(){
+      voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
+      voiceSelect.innerHTML = "";
+      const preferred = voices.filter(v => v.lang.startsWith("de") || v.lang.startsWith("en"));
+      (preferred.length ? preferred : voices).forEach(v=>{
+        const opt = document.createElement("option");
+        opt.value = v.name; opt.textContent = v.name + " (" + v.lang + ")";
+        voiceSelect.appendChild(opt);
+      });
+    }
+    if (window.speechSynthesis){
+      window.speechSynthesis.onvoiceschanged = loadVoices; loadVoices();
+    }
+    function speak(text){
+      if (!voiceToggle.checked || !window.speechSynthesis) return;
+      const msg = new SpeechSynthesisUtterance(text);
+      const sel = voices.find(v => v.name === voiceSelect.value);
+      if (sel) msg.voice = sel;
+      msg.rate = 1.0; msg.pitch = 1.0; msg.lang = (sel && sel.lang) || "de-DE";
+      speechSynthesis.cancel(); speechSynthesis.speak(msg);
+    }
+    function vibrate(ms){ if (vibrateToggle.checked && navigator.vibrate) navigator.vibrate(ms); }
+    function fmt(sec){ const m = String(Math.floor(sec/60)).padStart(2,"0"); const s = String(Math.floor(sec%60)).padStart(2,"0"); return m+":"+s; }
+    function parseRoutine(){ return routineInput.value.split("\\n").map(s=>s.trim()).filter(Boolean); }
+    function renderPreview(){
+      const work=+workSecEl.value, rest=+restSecEl.value, r=+roundsEl.value, ex=parseRoutine();
+      previewList.innerHTML=""; let total=0;
+      for(let round=1; round<=r; round++){
+        ex.forEach((name,idx)=>{
+          const li1=document.createElement("li");
+          li1.innerHTML = `<span><b>${name}</b> <span class="pill">Runde ${round}</span></span><span class="pill">⏱ ${work}s</span>`;
+          previewList.appendChild(li1); total+=work;
+          const isLast = (round===r) && (idx===ex.length-1);
+          if(rest>0 && !isLast){ const li2=document.createElement("li"); li2.innerHTML=`<span>Pause</span><span class="pill">⏱ ${rest}s</span>`; previewList.appendChild(li2); total+=rest;}
+        });
+      }
+      totalTimeEl.textContent = fmt(total);
+    }
+    renderPreview(); applyBtn.addEventListener("click", renderPreview);
+    let state="idle", routine=[], workSec=40, restSec=20, rounds=1, queue=[], idx=0, timeLeft=0, timerId=null;
+    function buildQueue(){
+      routine=parseRoutine(); workSec=+workSecEl.value; restSec=+restSecEl.value; rounds=+roundsEl.value;
+      queue=[]; for(let r=1;r<=rounds;r++){ routine.forEach((name,i)=>{ queue.push({type:"work",name,round:r,dur:workSec}); const isLast=(r===rounds)&&(i===routine.length-1); if(restSec>0&&!isLast) queue.push({type:"rest",name:"Pause",round:r,dur:restSec}); }); }
+      idx=0;
+    }
+    function updateUI(){
+      const item=queue[idx];
+      if(!item){ phaseEl.textContent="Fertig"; exerciseEl.textContent="Super gemacht!"; clockEl.textContent="00:00"; barEl.style.width="100%";
+        startBtn.disabled=false; pauseBtn.disabled=true; resetBtn.disabled=false; state="done"; speak("Fertig. Stark gemacht!"); vibrate([150,50,150]); return; }
+      phaseEl.textContent = item.type==="work"?"Übung":"Pause";
+      exerciseEl.textContent = item.type==="work"?item.name:"Kurz erholen";
+      clockEl.textContent = fmt(timeLeft);
+      const prog=((item.dur-timeLeft)/item.dur)*100; barEl.style.width = Math.max(0,Math.min(100,prog))+"%";
+      roundBadge.textContent = String(item.round);
+    }
+    function tick(){
+      timeLeft -= 1;
+      if(timeLeft<0){ idx+=1; startCurrent(); return; }
+      if(timeLeft===10) speak("Noch zehn Sekunden."); if(timeLeft===5) speak("Fünf."); if(timeLeft===3) speak("Drei."); if(timeLeft===2) speak("Zwei."); if(timeLeft===1) speak("Eins.");
+      updateUI();
+    }
+    function startCurrent(){
+      const item=queue[idx]; if(!item){ updateUI(); return; }
+      state=item.type; timeLeft=item.dur;
+      phaseEl.textContent=item.type==="work"?"Übung":"Pause"; exerciseEl.textContent=item.type==="work"?item.name:"Kurz erholen";
+      speak(item.type==="work"?`Starte: ${item.name}.`:"Pause."); vibrate(item.type==="work"?50:30);
+      updateUI();
+    }
+    function startTimer(){ clearInterval(timerId); timerId=setInterval(tick,1000); }
+    function stopTimer(){ clearInterval(timerId); timerId=null; }
+    function startSequence(){ buildQueue(); if(queue.length===0) return; startCurrent(); startTimer(); startBtn.disabled=true; pauseBtn.disabled=false; resetBtn.disabled=false; }
+    function pauseSequence(){
+      if(state==="paused"){ startTimer(); state="work"; pauseBtn.textContent="Pausieren"; speak("Weiter."); return; }
+      stopTimer(); state="paused"; pauseBtn.textContent="Weiter"; speak("Pausiert.");
+    }
+    function resetSequence(){ stopTimer(); state="idle"; idx=0; timeLeft=+workSecEl.value; phaseEl.textContent="Bereit"; exerciseEl.textContent="Drücke Start"; clockEl.textContent=fmt(timeLeft); barEl.style.width="0%"; startBtn.disabled=false; pauseBtn.disabled=true; pauseBtn.textContent="Pausieren"; resetBtn.disabled=true; }
+    resetSequence();
+    startBtn.addEventListener("click", startSequence);
+    pauseBtn.addEventListener("click", pauseSequence);
+    resetBtn.addEventListener("click", resetSequence);
+  </script>
+</body>
+</html>
