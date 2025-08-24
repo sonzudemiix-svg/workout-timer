@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1"/>
-  <title>Workout Timer – Single File</title>
+  <title>Workout Timer</title>
   <meta name="theme-color" content="#2563eb"/>
   <style>
     :root{--fg:#111;--bg:#fafafa;--muted:#6b7280;--accent:#2563eb}
@@ -44,10 +44,12 @@
       <label class="pill">Stimme: <select id="voiceSelect"></select></label>
     </div>
   </header>
+
   <main class="wrap">
-    <section class="panel timer-card" aria-live="polite">
-      <div class="phase" id="phase">Bereit</div>
-      <div class="exercise" id="exercise">Drücke Start</div>
+    <!-- WICHTIG: KEIN aria-live mehr auf dem Container -->
+    <section class="panel timer-card">
+      <div class="phase" id="phase" aria-live="polite"></div>
+      <div class="exercise" id="exercise" aria-live="assertive">Drücke Start</div>
       <div class="clock" id="clock">00:40</div>
       <div class="progress"><div class="bar" id="bar"></div></div>
       <div class="row">
@@ -58,6 +60,7 @@
         <span class="pill">Gesamt: <b id="totalTime">00:00</b></span>
       </div>
     </section>
+
     <section class="panel">
       <div class="row">
         <div class="grow">
@@ -83,17 +86,19 @@ Bauch-Crunches</textarea>
       </div>
       <div class="row" style="margin-top:10px">
         <button id="applyBtn" class="btn btn-ghost">Änderungen übernehmen</button>
-        <span class="pill">Tipp: In Safari öffnen (nicht nur Vorschau), damit Stimme/Vibration laufen.</span>
+        <span class="pill">Tipp: Bildschirm anlassen, Seite im Safari (nicht Vorschau) laufen lassen.</span>
       </div>
     </section>
+
     <section class="panel">
       <h3 style="margin:0 0 6px 0">Nächste Schritte</h3>
       <ul class="list" id="previewList"></ul>
-      <footer class="small">Ein-Datei-Version. Für Homescreen: in Safari öffnen → Teilen → „Zum Home-Bildschirm“.</footer>
+      <footer class="small">Ansagen nur bei Übergängen. Kein Vorlesen der ganzen Liste.</footer>
     </section>
-    <footer class="small">Made for Denis</footer>
   </main>
+
   <script>
+    // ------- Setup -------
     const $ = id => document.getElementById(id);
     const clockEl = $("clock"), exerciseEl = $("exercise"), phaseEl = $("phase"), barEl = $("bar");
     const startBtn = $("startBtn"), pauseBtn = $("pauseBtn"), resetBtn = $("resetBtn");
@@ -101,6 +106,8 @@ Bauch-Crunches</textarea>
     const applyBtn = $("applyBtn"), previewList = $("previewList");
     const voiceToggle = $("voiceToggle"), vibrateToggle = $("vibrateToggle"), voiceSelect = $("voiceSelect");
     const roundBadge = $("round"), totalTimeEl = $("totalTime");
+
+    // Stimmen laden
     let voices = [];
     function loadVoices(){
       voices = window.speechSynthesis ? speechSynthesis.getVoices() : [];
@@ -115,17 +122,23 @@ Bauch-Crunches</textarea>
     if (window.speechSynthesis){
       window.speechSynthesis.onvoiceschanged = loadVoices; loadVoices();
     }
-    function speak(text){
+
+    // sichere Sprachausgabe
+    function say(text){
       if (!voiceToggle.checked || !window.speechSynthesis) return;
+      try { speechSynthesis.cancel(); } catch(e){}
       const msg = new SpeechSynthesisUtterance(text);
       const sel = voices.find(v => v.name === voiceSelect.value);
       if (sel) msg.voice = sel;
-      msg.rate = 1.0; msg.pitch = 1.0; msg.lang = (sel && sel.lang) || "de-DE";
-      speechSynthesis.cancel(); speechSynthesis.speak(msg);
+      msg.lang = (sel && sel.lang) || "de-DE";
+      msg.rate = 1.0; msg.pitch = 1.0;
+      speechSynthesis.speak(msg);
     }
-    function vibrate(ms){ if (vibrateToggle.checked && navigator.vibrate) navigator.vibrate(ms); }
-    function fmt(sec){ const m = String(Math.floor(sec/60)).padStart(2,"0"); const s = String(Math.floor(sec%60)).padStart(2,"0"); return m+":"+s; }
-    function parseRoutine(){ return routineInput.value.split("\\n").map(s=>s.trim()).filter(Boolean); }
+    function buzz(ms){ if (vibrateToggle.checked && navigator.vibrate) navigator.vibrate(ms); }
+    const fmt = s => `${String(Math.floor(s/60)).padStart(2,"0")}:${String(Math.floor(s%60)).padStart(2,"0")}`;
+
+    function parseRoutine(){ return routineInput.value.split("\n").map(s=>s.trim()).filter(Boolean); }
+
     function renderPreview(){
       const work=+workSecEl.value, rest=+restSecEl.value, r=+roundsEl.value, ex=parseRoutine();
       previewList.innerHTML=""; let total=0;
@@ -134,54 +147,120 @@ Bauch-Crunches</textarea>
           const li1=document.createElement("li");
           li1.innerHTML = `<span><b>${name}</b> <span class="pill">Runde ${round}</span></span><span class="pill">⏱ ${work}s</span>`;
           previewList.appendChild(li1); total+=work;
-          const isLast = (round===r) && (idx===ex.length-1);
-          if(rest>0 && !isLast){ const li2=document.createElement("li"); li2.innerHTML=`<span>Pause</span><span class="pill">⏱ ${rest}s</span>`; previewList.appendChild(li2); total+=rest;}
+          const isLast=(round===r)&&(idx===ex.length-1);
+          if(rest>0 && !isLast){ const li2=document.createElement("li"); li2.innerHTML = `<span>Pause</span><span class="pill">⏱ ${rest}s</span>`; previewList.appendChild(li2); total+=rest; }
         });
       }
       totalTimeEl.textContent = fmt(total);
     }
     renderPreview(); applyBtn.addEventListener("click", renderPreview);
-    let state="idle", routine=[], workSec=40, restSec=20, rounds=1, queue=[], idx=0, timeLeft=0, timerId=null;
+
+    // ------- Timer-Engine (robust auf iOS) -------
+    let queue=[], idx=0, timeLeft=0, timerActive=false, paused=false, nextTickId=null;
+
     function buildQueue(){
-      routine=parseRoutine(); workSec=+workSecEl.value; restSec=+restSecEl.value; rounds=+roundsEl.value;
-      queue=[]; for(let r=1;r<=rounds;r++){ routine.forEach((name,i)=>{ queue.push({type:"work",name,round:r,dur:workSec}); const isLast=(r===rounds)&&(i===routine.length-1); if(restSec>0&&!isLast) queue.push({type:"rest",name:"Pause",round:r,dur:restSec}); }); }
+      const routine=parseRoutine(), work=+workSecEl.value, rest=+restSecEl.value, rounds=+roundsEl.value;
+      queue=[];
+      for(let r=1;r<=rounds;r++){
+        routine.forEach((name,i)=>{
+          queue.push({type:"work", name, round:r, dur:work});
+          const isLast=(r===rounds)&&(i===routine.length-1);
+          if(rest>0 && !isLast) queue.push({type:"rest", name:"Pause", round:r, dur:rest});
+        });
+      }
       idx=0;
     }
+
     function updateUI(){
       const item=queue[idx];
-      if(!item){ phaseEl.textContent="Fertig"; exerciseEl.textContent="Super gemacht!"; clockEl.textContent="00:00"; barEl.style.width="100%";
-        startBtn.disabled=false; pauseBtn.disabled=true; resetBtn.disabled=false; state="done"; speak("Fertig. Stark gemacht!"); vibrate([150,50,150]); return; }
+      if(!item){
+        phaseEl.textContent="Fertig";
+        exerciseEl.textContent="Super gemacht!";
+        clockEl.textContent="00:00";
+        barEl.style.width="100%";
+        startBtn.disabled=false; pauseBtn.disabled=true; resetBtn.disabled=false;
+        return;
+      }
       phaseEl.textContent = item.type==="work"?"Übung":"Pause";
       exerciseEl.textContent = item.type==="work"?item.name:"Kurz erholen";
+      roundBadge.textContent = String(item.round);
       clockEl.textContent = fmt(timeLeft);
       const prog=((item.dur-timeLeft)/item.dur)*100; barEl.style.width = Math.max(0,Math.min(100,prog))+"%";
-      roundBadge.textContent = String(item.round);
     }
-    function tick(){
-      timeLeft -= 1;
-      if(timeLeft<0){ idx+=1; startCurrent(); return; }
-      if(timeLeft===10) speak("Noch zehn Sekunden."); if(timeLeft===5) speak("Fünf."); if(timeLeft===3) speak("Drei."); if(timeLeft===2) speak("Zwei."); if(timeLeft===1) speak("Eins.");
+
+    function startStep(){
+      const item=queue[idx];
+      if(!item){ finish(); return; }
+      timeLeft = item.dur;
+      phaseEl.textContent = item.type==="work"?"Übung":"Pause";
+      exerciseEl.textContent = item.type==="work"?item.name:"Kurz erholen";
+      say(item.type==="work" ? `Starte: ${item.name}` : "Pause");
+      buzz(item.type==="work"?50:30);
+      scheduleTick();
       updateUI();
     }
-    function startCurrent(){
-      const item=queue[idx]; if(!item){ updateUI(); return; }
-      state=item.type; timeLeft=item.dur;
-      phaseEl.textContent=item.type==="work"?"Übung":"Pause"; exerciseEl.textContent=item.type==="work"?item.name:"Kurz erholen";
-      speak(item.type==="work"?`Starte: ${item.name}.`:"Pause."); vibrate(item.type==="work"?50:30);
+
+    function scheduleTick(){
+      // statt setInterval: präziser via rekursivem setTimeout
+      cancelTick();
+      timerActive = true;
+      const tick = () => {
+        if (!timerActive || paused) return;
+        timeLeft -= 1;
+        if (timeLeft < 0){
+          idx += 1;
+          startStep();
+          return;
+        }
+        if (timeLeft===10) say("Noch zehn Sekunden.");
+        if (timeLeft===5) say("Fünf.");
+        if (timeLeft===3) say("Drei.");
+        if (timeLeft===2) say("Zwei.");
+        if (timeLeft===1) say("Eins.");
+        updateUI();
+        nextTickId = setTimeout(tick, 1000);
+      };
+      nextTickId = setTimeout(tick, 1000);
+    }
+
+    function cancelTick(){ if (nextTickId){ clearTimeout(nextTickId); nextTickId=null; } }
+
+    function finish(){
+      timerActive=false; cancelTick();
+      say("Fertig. Stark gemacht!");
+      buzz([150,50,150]);
       updateUI();
     }
-    function startTimer(){ clearInterval(timerId); timerId=setInterval(tick,1000); }
-    function stopTimer(){ clearInterval(timerId); timerId=null; }
-    function startSequence(){ buildQueue(); if(queue.length===0) return; startCurrent(); startTimer(); startBtn.disabled=true; pauseBtn.disabled=false; resetBtn.disabled=false; }
-    function pauseSequence(){
-      if(state==="paused"){ startTimer(); state="work"; pauseBtn.textContent="Pausieren"; speak("Weiter."); return; }
-      stopTimer(); state="paused"; pauseBtn.textContent="Weiter"; speak("Pausiert.");
-    }
-    function resetSequence(){ stopTimer(); state="idle"; idx=0; timeLeft=+workSecEl.value; phaseEl.textContent="Bereit"; exerciseEl.textContent="Drücke Start"; clockEl.textContent=fmt(timeLeft); barEl.style.width="0%"; startBtn.disabled=false; pauseBtn.disabled=true; pauseBtn.textContent="Pausieren"; resetBtn.disabled=true; }
-    resetSequence();
-    startBtn.addEventListener("click", startSequence);
-    pauseBtn.addEventListener("click", pauseSequence);
-    resetBtn.addEventListener("click", resetSequence);
+
+    // Buttons
+    startBtn.addEventListener("click", ()=>{
+      buildQueue();
+      if (!queue.length) return;
+      startBtn.disabled=true; pauseBtn.disabled=false; resetBtn.disabled=false;
+      paused=false; timerActive=true; startStep();
+    });
+
+    pauseBtn.addEventListener("click", ()=>{
+      if (!timerActive) return;
+      paused = !paused;
+      pauseBtn.textContent = paused ? "Weiter" : "Pausieren";
+      if (paused){ cancelTick(); say("Pausiert."); }
+      else { say("Weiter."); scheduleTick(); }
+    });
+
+    resetBtn.addEventListener("click", ()=>{
+      timerActive=false; paused=false; cancelTick();
+      startBtn.disabled=false; pauseBtn.disabled=true; resetBtn.disabled=true;
+      phaseEl.textContent="Bereit"; exerciseEl.textContent="Drücke Start";
+      timeLeft = +workSecEl.value || 40; clockEl.textContent = fmt(timeLeft); barEl.style.width="0%";
+    });
+
+    // Initial
+    (function init(){
+      timeLeft = +workSecEl.value || 40;
+      clockEl.textContent = fmt(timeLeft);
+      phaseEl.textContent = "Bereit";
+    })();
   </script>
 </body>
 </html>
